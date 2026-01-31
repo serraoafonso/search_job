@@ -31,81 +31,85 @@ class AgentState(TypedDict):
 # --- AGENTES ---
 
 def escritor(state: AgentState):
-    print(f"\n✍️  ESCRITOR A TRABALHAR (Tentativa {state['iteracoes'] + 1})...")
+    print(f"\n✍️  WRITER AT WORK (Attempt {state['iteracoes'] + 1})...")
     
-    linhas = [l.strip() for l in state['lista_bruta'].split('\n') if l.strip()]
+    linhas = [l.strip() for l in state['lista_bruta'].split('\n') if l.strip() and '|' in l]
     if not linhas:
-        return {"rascunho": "ERRO: Lista vazia.", "iteracoes": state['iteracoes']}
+        return {"rascunho": "ERROR: Empty or invalid list.", "iteracoes": state['iteracoes']}
 
     # Escolher uma empresa aleatória
     empresa_alvo_texto = random.choice(linhas)
     
     # Extração robusta de e-mail usando Regex
-    # Procura por algo que pareça um email, mas ignora se for apenas um link de contato
     match_email = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', empresa_alvo_texto)
     
-    if match_email:
-        email_final = match_email.group(0)
-    else:
-        # Se não houver email, tentamos extrair um URL de contato
-        match_url = re.search(r'https?://[^\s|]+', empresa_alvo_texto)
-        email_final = match_url.group(0) if match_url else "CONTACT_FORM_REQUIRED"
+    if not match_email:
+        # SE NÃO HOUVER EMAIL, PARAMOS AQUI
+        msg_erro = f"❌ SKIPPING: No email found for target: {empresa_alvo_texto.split('|')[0].strip()}"
+        print(msg_erro)
+        return {"rascunho": msg_erro, "iteracoes": 3} # Forçamos o fim do loop
 
-    print(f"   -> Alvo selecionado: {empresa_alvo_texto}")
-    print(f"   -> Contacto detetado: {email_final}")
+    email_final = match_email.group(0)
+    print(f"   -> Target selected: {empresa_alvo_texto}")
+    print(f"   -> Email detected: {email_final}")
 
     prompt = f"""
-    INFO DA EMPRESA ALVO:
+    TARGET COMPANY INFO:
     {empresa_alvo_texto}
 
-    CONTACTO (OBRIGATÓRIO): {email_final}
+    TARGET EMAIL (MANDATORY): {email_final}
 
-    PERFIL DO CANDIDATO:
-    - Nome: Afonso (18 anos).
-    - Disponibilidade: 1 de Julho a 30 de Setembro de 2026.
-    - Stack: Python (Automação/Agentes), JS (Algoritmos), SQL.
-    - Projetos: Job Hunting Agent (CrewAI/LangGraph), Sudoku Solver (Backtracking).
-    - Académico: Média de 18.4 em Matemática.
+    CANDIDATE PROFILE:
+    - Name: Afonso (18 years old).
+    - Availability: July 1st to September 30th, 2026.
+    - Stack: Python (Automation/Agents), JS (Algorithms), SQL.
+    - Projects: Job Hunting Agent (CrewAI/LangGraph), Sudoku Solver (Backtracking).
+    - Academic: 18.4 Math GPA.
 
-    INSTRUÇÕES:
-    1. **Personalização:** Identifica o setor da empresa (AI, Fintech, etc.).
-    2. **Proposta de Valor:** Oferece-te para fazer o "trabalho pesado" (limpeza de dados, testes, dashboards).
-    3. **Tom:** Profissional, mas humilde e direto.
-    4. **Formato:**
-       Para: {email_final}
-       Assunto: [Assunto Criativo sobre ajuda em {email_final}]
+    INSTRUCTIONS:
+    1. **Language:** The entire email MUST be in English.
+    2. **Personalization:** Identify the company sector (AI, Fintech, etc.).
+    3. **Value Prop:** Offer to do the "grunt work" (data cleaning, testing, dashboards).
+    4. **Tone:** Professional, humble, and direct.
+    5. **Format:**
+       To: {email_final}
+       Subject: [Creative Subject about helping with {email_final}]
        
-       [Corpo do Email em Inglês, pois é para Zurique]
+       [Email Body in English]
 
-    CRÍTICA ANTERIOR: {state.get('critica', 'Nenhuma')}
+    PREVIOUS CRITIQUE: {state.get('critica', 'None')}
     """
     
     msg = llm.invoke([HumanMessage(content=prompt)])
     return {"rascunho": msg.content, "iteracoes": state['iteracoes'] + 1}
 
 def critico(state: AgentState):
-    print("🧐 CRÍTICO A VALIDAR...")
+    # Se já houve um erro de "No email found", não precisamos criticar
+    if "SKIPPING" in state['rascunho']:
+        return {"critica": "APROVADO"}
+
+    print("🧐 CRITIC VALIDATING...")
     
     prompt = f"""
-    És um Mentor de Carreira. Revê este rascunho de cold email para uma startup em Zurique:
+    You are a Career Mentor. Review this cold email draft for a startup in Zurich:
     
     {state['rascunho']}
     
     CHECKLIST:
-    1. O e-mail está em Inglês? (Obrigatório para Zurique)
-    2. Menciona a disponibilidade (Julho-Setembro 2026)?
-    3. A proposta de valor é clara (ajudar com tarefas chatas/grunt work)?
-    4. O contacto 'To:' está correto e não é inventado?
+    1. Is the email in English? (Mandatory)
+    2. Does it mention availability (July-Sept 2026)?
+    3. Is the value prop clear (helping with grunt work)?
+    4. Is the 'To:' field correct and not hallucinated?
 
-    Se estiver perfeito, responde apenas: APROVADO.
-    Caso contrário, dá instruções de correção.
+    If it's perfect, reply only: APPROVED.
+    Otherwise, provide correction instructions in English.
     """
     
     msg = llm.invoke([HumanMessage(content=prompt)])
     return {"critica": msg.content}
 
 def verificar_qualidade(state: AgentState):
-    if "APROVADO" in state['critica'] or state['iteracoes'] >= 3:
+    if "APPROVED" in state['critica'] or "APROVADO" in state['critica'] or state['iteracoes'] >= 3:
         return "fim"
     return "refazer"
 
@@ -122,17 +126,17 @@ app = workflow.compile()
 if __name__ == "__main__":
     arquivo_empresas = "lista_empresas.txt"
     if not os.path.exists(arquivo_empresas):
-        print(f"❌ ERRO: '{arquivo_empresas}' não encontrado. Corre primeiro o 'search_job.py'.")
+        print(f"❌ ERROR: '{arquivo_empresas}' not found. Run 'search_job.py' first.")
         exit()
         
     with open(arquivo_empresas, "r", encoding="utf-8") as f:
         conteudo = f.read()
 
-    print("### GERANDO COLD MESSAGE REFINADA ###")
+    print("### GENERATING REFINED COLD MESSAGE (STRICT ENGLISH) ###")
     res = app.invoke({"lista_bruta": conteudo, "rascunho": "", "iteracoes": 0})
 
     print("\n" + "="*50)
-    print("📧 MENSAGEM FINAL")
+    print("📧 FINAL OUTPUT")
     print("="*50)
     print(res['rascunho'])
     print("="*50)
